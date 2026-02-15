@@ -1,70 +1,149 @@
 import cv2
 import numpy as np
+from scipy.spatial import distance as dist
+from imutils import perspective
+import imutils
 
-# ---------------------------
-# สมการประมาณน้ำหนักแบบง่าย
-# weight = k * area
-# คุณสามารถเก็บข้อมูลจริงแล้วหาค่า k ใหม่ได้
-# ---------------------------
-K = 0.0035   # ค่าตัวคูณสมมติ (ปรับตามข้อมูลจริงของคุณ)
+# ================================
+# ฟังก์ชัน midpoint (เหมือนของเดิม)
+# ================================
+def midpoint(ptA, ptB):
+    return ((ptA[0] + ptB[0]) * 0.5, (ptA[1] + ptB[1]) * 0.5)
 
-def estimate_weight(area):
-    return K * area
+# ================================
+# เปิดกล้อง
+# ================================
+cap = cv2.VideoCapture(0)
 
+# ==============
+# NOTE: ผมแก้ตรงนี้
+# ของเดิมคุณใช้ while(cap.read()) ซึ่งผิด → ทำให้กล้องค้าง
+# ==============
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
 
-# ---------------------------
-# ฟังก์ชันประมวลผลภาพ
-# ---------------------------
-def process_image(path):
-    # อ่านภาพ
-    img = cv2.imread(path)
-    if img is None:
-        print("ไม่พบไฟล์ภาพ")
-        return
+    # resize ลงเพื่อให้เบาเครื่อง
+    frame = cv2.resize(frame, None, fx=1, fy=1)
 
-    # Resize เล็กลงเพื่อให้คำนวณเร็วขึ้น
-    img = cv2.resize(img, (600, 400))
+    # =============================
+    # แปลงภาพเป็น Gray → Blur → Threshold
+    # =============================
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (15, 15), 0)
 
-    # แปลงเป็น Gray
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Blur ลด Noise
-    blur = cv2.GaussianBlur(gray, (7, 7), 0)
-
-    # Threshold แยกแตงโมออกจากพื้นหลัง
-    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # หา Contours
-    contours, _ = cv2.findContours(
-        thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    # -------------------------
+    # NOTE: โค้ดเดิมมี BUG ผิดสะกด THRESH_BINARY_INV
+    # ผมแก้จาก THRESH_BINARY_ INV → THRESH_BINARY_INV
+    # -------------------------
+    thresh = cv2.adaptiveThreshold(
+        blur, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        11, 2
     )
 
-    if len(contours) == 0:
-        print("ไม่พบวัตถุในภาพ")
-        return
+    # -------------------------
+    # NOTE: แก้ชื่อ kernel (ของเดิม kernal)
+    # -------------------------
+    kernel = np.ones((3, 3), np.uint8)
+    closing = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=3)
 
-    # เลือกคอนทัวร์ที่ใหญ่ที่สุด (คิดว่าเป็นแตงโม)
-    c = max(contours, key=cv2.contourArea)
+    result_img = closing.copy()
 
-    area = cv2.contourArea(c)
-    weight = estimate_weight(area)
+    # ============================
+    # หา Contours
+    # ============================
+    cnts = cv2.findContours(result_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = cnts[0] if len(cnts) == 2 else cnts[1]
 
-    # วาดเส้น contour
-    output = img.copy()
-    cv2.drawContours(output, [c], -1, (0, 255, 0), 2)
+    hitung_objek = 0
 
-    # แสดงผล
-    print(f"Area ที่ตรวจพบ: {area:.2f}")
-    print(f"ประมาณน้ำหนัก: {weight:.2f} กรัม")
+    for cnt in cnts:
+        area = cv2.contourArea(cnt)
 
-    cv2.imshow("Original", img)
-    cv2.imshow("Threshold", thresh)
-    cv2.imshow("Detected Watermelon", output)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        # กรองวัตถุที่เล็กเกินไป
+        if area < 3000:
+            continue
 
+        hitung_objek += 1
 
-# ---------------------------
-# เรียกใช้งาน
-# ---------------------------
-process_image("watermelon.jpg")   # เปลี่ยนชื่อไฟล์ตามของคุณ
+        # ======================
+        # NOTE: คุณใช้ BoxPoints แบบเก่า ผมแก้ให้เป็นเวอร์ชันใหม่
+        # ======================
+        box = cv2.minAreaRect(cnt)
+        box = cv2.boxPoints(box)
+        box = np.array(box, dtype="int")
+        box = perspective.order_points(box)
+
+        # วาดกรอบ
+        orig = frame.copy()
+        cv2.drawContours(orig, [box.astype("int")], -1, (0, 255, 0), 2)
+
+        # ----------------------
+        # หา midpoint
+        # ----------------------
+        (tl, tr, br, bl) = box
+        (tltrX, tltrY) = midpoint(tl, tr)
+        (blbrX, blbrY) = midpoint(bl, br)
+
+        (tlblX, tlblY) = midpoint(tl, bl)
+        (trbrX, trbrY) = midpoint(tr, br)
+
+        # วาดจุด
+        cv2.circle(orig, (int(tltrX), int(tltrY)), 5, (0, 255, 0), -1)
+        cv2.circle(orig, (int(blbrX), int(blbrY)), 5, (0, 255, 0), -1)
+        cv2.circle(orig, (int(tlblX), int(tlblY)), 5, (0, 255, 0), -1)
+        cv2.circle(orig, (int(trbrX), int(trbrY)), 5, (0, 255, 0), -1)
+
+        # เส้นกากบาท
+        cv2.line(orig, (int(tltrX), int(tltrY)), (int(blbrX), int(blbrY)), (255, 0, 255), 2)
+        cv2.line(orig, (int(tlblX), int(tlblY)), (int(trbrX), int(trbrY)), (255, 0, 255), 2)
+
+        # ==========================
+        # คำนวณระยะพิกเซล
+        # ==========================
+        lebar_pixel = dist.euclidean((tltrX, tltrY), (blbrX, blbrY))
+        panjang_pixel = dist.euclidean((tlblX, tlblY), (trbrX, trbrY))
+
+        # -------------------------
+        # NOTE: คุณคำนวณผิดหลายจุด ผมแก้ดังนี้:
+        # - 1 pixel = 1/25.5 cm (ต้องปรับตามกล้องจริง)
+        # -------------------------
+        cm_per_pixel = 1 / 25.5
+
+        real_width = lebar_pixel * cm_per_pixel
+        real_height = panjang_pixel * cm_per_pixel
+
+        # ==========================
+        # โมเดลคำนวณน้ำหนักแบบทรงรี (ตามสูตรของคุณ)
+        # ==========================
+        weight = (0.0019 * ((2 * real_width * (real_height ** 2) * 3.14) / 3)) + 0.2228
+
+        # ==========================
+        # แสดงข้อมูลบนจอ
+        # ==========================
+        cv2.putText(orig, f"L: {real_width:.2f} CM", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        cv2.putText(orig, f"H: {real_height:.2f} CM", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        cv2.putText(orig, f"Weight: {weight:.2f} kg", (10, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 20, 127), 2)
+
+        cv2.putText(orig, f"Objects: {hitung_objek}", (10, 140),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (30, 144, 255), 2)
+
+        cv2.putText(orig, "*** Keep 60 cm distance ***",
+                    (10, 450), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (50, 50, 50), 2)
+
+        cv2.imshow("Camera", orig)
+
+    # ปิดโปรแกรมเมื่อกด ESC
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
+cap.release()
+cv2.destroyAllWindows()
