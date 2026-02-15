@@ -5,7 +5,7 @@ from imutils import perspective
 import imutils
 
 # ================================
-# ฟังก์ชัน midpoint (เหมือนของเดิม)
+# ฟังก์ชัน midpoint 
 # ================================
 def midpoint(ptA, ptB):
     return ((ptA[0] + ptB[0]) * 0.5, (ptA[1] + ptB[1]) * 0.5)
@@ -15,16 +15,13 @@ def midpoint(ptA, ptB):
 # ================================
 cap = cv2.VideoCapture(0)
 
-# ==============
-# NOTE: ผมแก้ตรงนี้
-# ของเดิมคุณใช้ while(cap.read()) ซึ่งผิด → ทำให้กล้องค้าง
-# ==============
+
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    # resize ลงเพื่อให้เบาเครื่อง
+    # resize 
     frame = cv2.resize(frame, None, fx=1, fy=1)
 
     # =============================
@@ -33,10 +30,6 @@ while True:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (15, 15), 0)
 
-    # -------------------------
-    # NOTE: โค้ดเดิมมี BUG ผิดสะกด THRESH_BINARY_INV
-    # ผมแก้จาก THRESH_BINARY_ INV → THRESH_BINARY_INV
-    # -------------------------
     thresh = cv2.adaptiveThreshold(
         blur, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -44,9 +37,6 @@ while True:
         11, 2
     )
 
-    # -------------------------
-    # NOTE: แก้ชื่อ kernel (ของเดิม kernal)
-    # -------------------------
     kernel = np.ones((3, 3), np.uint8)
     closing = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=3)
 
@@ -69,9 +59,6 @@ while True:
 
         hitung_objek += 1
 
-        # ======================
-        # NOTE: คุณใช้ BoxPoints แบบเก่า ผมแก้ให้เป็นเวอร์ชันใหม่
-        # ======================
         box = cv2.minAreaRect(cnt)
         box = cv2.boxPoints(box)
         box = np.array(box, dtype="int")
@@ -107,17 +94,13 @@ while True:
         lebar_pixel = dist.euclidean((tltrX, tltrY), (blbrX, blbrY))
         panjang_pixel = dist.euclidean((tlblX, tlblY), (trbrX, trbrY))
 
-        # -------------------------
-        # NOTE: คุณคำนวณผิดหลายจุด ผมแก้ดังนี้:
-        # - 1 pixel = 1/25.5 cm (ต้องปรับตามกล้องจริง)
-        # -------------------------
         cm_per_pixel = 1 / 25.5
 
         real_width = lebar_pixel * cm_per_pixel
         real_height = panjang_pixel * cm_per_pixel
 
         # ==========================
-        # โมเดลคำนวณน้ำหนักแบบทรงรี (ตามสูตรของคุณ)
+        # โมเดลคำนวณน้ำหนักแบบทรงรี 
         # ==========================
         weight = (0.0019 * ((2 * real_width * (real_height ** 2) * 3.14) / 3)) + 0.2228
 
